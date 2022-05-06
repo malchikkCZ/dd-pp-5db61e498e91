@@ -1,6 +1,7 @@
 import functools
 
 from flask import jsonify, request
+from flask_login import current_user, login_user, logout_user
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from app.main import app, db
@@ -10,11 +11,12 @@ from app.models import User, Todo
 def is_authenticated(f):
     @functools.wraps(f)
     def inner(*args, **kwargs):
-        # TODO: Authenticate the user via API call
+        if current_user.is_authenticated:
+            user = current_user
+            return f(user, *args, **kwargs)
+        else:
+            return jsonify({ 'Error': 'User not logged in' }), 401
 
-        user_id = 1
-        user = User.query.get(user_id)
-        return f(user, *args, **kwargs)
     return inner
 
 
@@ -76,15 +78,12 @@ def single_todo(user, todo_id):
 @app.route('/todos', methods=['POST'])
 @is_authenticated
 def create_todo(user):
-    req = request.json
-
-    # TODO: Save the uploaded file to uploads and construct to URL to that file
-    file_url = ''
+    req = request.form
 
     new_todo = Todo(
         title = req['title'],
         description = req['description'],
-        file_url = file_url,
+        filename = Todo.upload_file(request),
         is_done = False,
         user_id = user.id
     )
@@ -92,15 +91,15 @@ def create_todo(user):
     db.session.add(new_todo)
     db.session.commit()
 
-    return jsonify({ "Success": "New todo added to the database" }), 200
+    return jsonify({ 'Success': 'New todo added to the database' }), 200
 
 
 # # User routes
 
 # Register a new user
 @app.route('/register', methods=['POST'])
-def register_user():
-    req = request.json
+def register():
+    req = request.form
     if User.query.filter_by(username=req['username']).first():
         return jsonify({ 'Error': 'This username already exists' }), 400
     else:
@@ -112,3 +111,23 @@ def register_user():
         db.session.commit()
 
         return jsonify({ 'Success': 'New user added to the database' }), 200
+
+
+# Login an existing user
+@app.route('/login', methods=['POST'])
+def login():
+    req = request.form
+    user = User.query.filter_by(username=req['username']).first()
+    if user and check_password_hash(user.password, req['password']):
+        login_user(user)
+        return jsonify({ 'Success': f'Logged in as {user.username}' }), 200
+    else:
+        return jsonify({ 'Error': 'Invalid username or password' }), 401
+
+
+# Logout current user
+@app.route('/logout', methods=['POST'])
+@is_authenticated
+def logout(user):
+    logout_user()
+    return jsonify({ 'Success': f'Logged out' }), 200
